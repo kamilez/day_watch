@@ -5,7 +5,7 @@ import (
 	"os/exec"
 )
 
-const IMAGE_PATH = "/home/kamil/Documents/busy_beaver.jpg"
+const IMAGE_PATH = "/home/kamil/Documents/busy_beaver.png"
 
 type Notifier interface {
 	Notify() error

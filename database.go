@@ -6,6 +6,7 @@ import (
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
 	"reflect"
+	"time"
 )
 
 type Database struct {
@@ -99,9 +100,9 @@ func (db *Database) RowAppend(name string, obj interface{}) error {
 	return err
 }
 
-func (db *Database) RowGetLast(name string) (Notification, error) {
+func (db *Database) GetLastNotification() (Notification, error) {
 
-	query := "SELECT * FROM '" + name + "' WHERE ID = (SELECT MAX(ID) FROM '" + name + "')"
+	query := "SELECT * FROM 'hours' WHERE ID = (SELECT MAX(ID) FROM 'hours')"
 	fmt.Println("Query: ", query)
 
 	rows, err := db.db.Query(query)
@@ -114,7 +115,7 @@ func (db *Database) RowGetLast(name string) (Notification, error) {
 	noti := Notification{}
 	for rows.Next() {
 		var id int
-		err = rows.Scan(&id, &noti.Type, &noti.Hour, &noti.Minute, &noti.Day, &noti.Month, &noti.Year)
+		err = rows.Scan(&id, &noti.Type, &noti.Time)
 		if err != nil {
 			fmt.Errorf("Error: ", err.Error())
 			return Notification{}, err
@@ -122,4 +123,117 @@ func (db *Database) RowGetLast(name string) (Notification, error) {
 	}
 
 	return noti, err
+}
+
+func (db *Database) GetLastSession() (Session, error) {
+
+	query := "SELECT * FROM 'sessions' WHERE ID = (SELECT MAX(ID) FROM 'sessions')"
+	fmt.Println("Query: ", query)
+
+	rows, err := db.db.Query(query)
+	defer rows.Close()
+	if err != nil {
+		fmt.Errorf("Error: ", err.Error())
+		return Session{}, err
+	}
+
+	session := Session{}
+	for rows.Next() {
+		var id int
+		err = rows.Scan(&id, &session.Start, &session.Stop, &session.Date, &session.Length)
+		if err != nil {
+			fmt.Errorf("Error: %s", err.Error())
+			return Session{}, err
+		}
+	}
+
+	return session, err
+}
+
+func (db *Database) UpdateSession(session *Session) error {
+
+	query := fmt.Sprintf("UPDATE 'sessions' SET STOP = '%s', LENGTH = '%d' WHERE START = '%s' AND DATE = '%s'",
+		session.Stop, session.Length, session.Start, session.Date)
+
+	fmt.Println(query)
+
+	stmt, err := db.db.Prepare(query)
+	if err != nil {
+		fmt.Println("Query preparation failed")
+		fmt.Errorf(err.Error())
+		return err
+	}
+
+	_, err = stmt.Exec()
+	if err != nil {
+		fmt.Println("Query execution failed")
+		fmt.Errorf("", err.Error())
+		return err
+	}
+
+	return nil
+}
+
+func (db *Database) GetWorkedHours(session Session) (time.Time, error) {
+
+	query := fmt.Sprintf("SELECT * FROM 'sessions' WHERE DATE = '%s'", session.Date)
+
+	rows, err := db.db.Query(query)
+	defer rows.Close()
+	if err != nil {
+		fmt.Errorf("Error: ", err.Error())
+		return time.Time{}, err
+	}
+
+	var totalMinutes int
+
+	sn := Session{}
+	var id int
+
+	for rows.Next() {
+		err = rows.Scan(&id, &sn.Start, &sn.Stop, &sn.Date, &sn.Length)
+		fmt.Println(sn.Length)
+		if err != nil {
+			fmt.Errorf("Error: %s", err.Error())
+			return time.Time{}, err
+		}
+
+		totalMinutes += sn.Length
+	}
+
+	return time.Time{}.Add(time.Duration(totalMinutes) * time.Minute), nil
+}
+
+func (db *Database) GetFirstActivity(session Session) (time.Time, error) {
+
+	query := fmt.Sprintf("SELECT * FROM 'sessions' WHERE DATE = '%s' ORDER BY ID LIMIT 1", session.Date)
+	fmt.Println("Query: ", query)
+
+	rows, err := db.db.Query(query)
+	defer rows.Close()
+	if err != nil {
+		fmt.Errorf("Error: ", err.Error())
+		return time.Time{}, err
+	}
+
+	sn := Session{}
+	var id int
+
+	for rows.Next() {
+		err = rows.Scan(&id, &sn.Start, &sn.Stop, &sn.Date, &sn.Length)
+		if err != nil {
+			fmt.Println("asdsad")
+			fmt.Errorf("Error: %s", err.Error())
+			return time.Time{}, err
+		}
+	}
+
+	formattedTime, err := time.Parse(DEFAULT_TIME_FORMAT, sn.Start)
+	if err != nil {
+		fmt.Println("asdsadasdsada")
+		fmt.Errorf("Error: ", err.Error())
+		return time.Time{}, err
+	}
+
+	return formattedTime, nil
 }

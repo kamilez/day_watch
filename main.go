@@ -16,93 +16,136 @@ var (
 	graphCmd *string
 )
 
+type LogType string
+
+const (
+	NONE   LogType = "_"
+	LOGIN  LogType = "I"
+	LOGOUT LogType = "O"
+)
+
 type Notification struct {
-	Type   string `sql:"TEXT NOT NULL"`
-	Hour   int    `sql:"INT"`
-	Minute int    `sql:"INT"`
-	Day    int    `sql:"INT"`
-	Month  int    `sql:"INT"`
-	Year   int    `sql:"INT"`
+	Type string `sql:"TEXT NOT NULL"`
+	Time string `sql:"TEXT NOT NULL"`
+	Date string `sql:"TEXT NOT NULL"`
+}
+
+type Session struct {
+	Start  string `sql:"TEXT NOT NULL"`
+	Stop   string `sql:"TEXT NOT NULL"`
+	Date   string `sql:"TEXT NOT NULL"`
+	Length int    `sql:"INT"`
 }
 
 const DATABASE_PATH = "/home/kamil/Documents/working_hours.db"
+const DEFAULT_TIME_FORMAT = "15:04:05"
+const DEFAULT_DATE_FORMAT = "02/01/2006"
 
 var Db *Database
 
 func init() {
 
-	loginCmd = flag.Bool("login", false, "register login to system")
-	logoutCmd = flag.Bool("logout", false, "register logout from system")
-
-	graphCmd = flag.String("graph", "", "create graph image with working hours and breaks, enter the image path")
-	breakCmd = flag.String("break", "", `set break hours in "hh:mm format"`)
-	imageCmd = flag.String("image", "", "set notification image path")
+	loginCmd = flag.Bool("login", false,
+		"register login to system")
+	logoutCmd = flag.Bool("logout", false,
+		"register logout from system")
+	graphCmd = flag.String("graph", "",
+		"create graph image with working hours and breaks, enter the image path")
+	breakCmd = flag.String("break", "",
+		`set break hours in "hh:mm format"`)
 
 	flag.Parse()
+}
+
+func main() {
 
 	Db = NewDatabase(DATABASE_PATH)
 	if Db == nil {
 		os.Exit(1)
 	}
-}
-
-func main() {
 
 	now := time.Now()
-
-	noti := Notification{
-		"",
-		now.Hour(),
-		now.Minute(),
-		now.Day(),
-		int(now.Month()),
-		int(now.Year()),
-	}
+	noti := Notification{Type: "", Time: now.Format(DEFAULT_TIME_FORMAT), Date: now.Format(DEFAULT_DATE_FORMAT)}
 
 	if *loginCmd == true {
-		noti.Type = "Login"
-		handleLoginCmd(noti)
+		noti.Type = string(LOGIN)
 
-		current := timeToSimpleFormat(now)
-		leave := timeToSimpleFormat(now.Add(time.Hour * 8))
-
-		notification := NewGnomeNotification("", "DayWatch", "Login: "+current+"\nLeave: "+leave, "")
-		err := notification.Notify()
-		if err != nil {
-			fmt.Errorf("Posting notification failed:", err.Error())
+		session := Session{
+			Start:  now.Format(DEFAULT_TIME_FORMAT),
+			Stop:   "",
+			Date:   now.Format(DEFAULT_DATE_FORMAT),
+			Length: 0,
 		}
 
+		Db.TableCreate("sessions", session)
+		Db.RowAppend("sessions", session)
+
+		total, err := Db.GetWorkedHours(session)
+		if err != nil {
+			fmt.Errorf("Getting worked hours failed: %v", err)
+			os.Exit(1)
+		}
+
+		firstActivity, err := Db.GetFirstActivity(session)
+		if err != nil {
+			fmt.Errorf("Getting first activity failed: %v", err)
+			fmt.Println("asdsa")
+			os.Exit(1)
+		}
+
+		leaveTime := firstActivity.Add(8 * time.Hour)
+
+		PostNotification(
+			"Started:\t"+firstActivity.Format("15:04"),
+			"Worked:\t"+total.Format("15:04"),
+			"Leave:\t\t"+leaveTime.Format("15:04"),
+		)
+
 	} else if *logoutCmd == true {
-		noti.Type = "Logout"
-		handleLogoutCmd(noti)
+		noti.Type = string(LOGOUT)
+
+		session, err := Db.GetLastSession()
+		if err != nil {
+			fmt.Errorf("Getting last session failed: %v", err)
+			os.Exit(1)
+		}
+
+		if session.Stop == "" {
+
+			start, err := time.Parse(DEFAULT_TIME_FORMAT, session.Start)
+			if err != nil {
+				fmt.Errorf("Parsing string to time format failed: %v", err)
+			}
+
+			session.Stop = now.Format(DEFAULT_TIME_FORMAT)
+			session.Length =
+				now.Hour()*60 + now.Minute() - start.Hour()*60 - start.Minute()
+			//session.Length = int(now.Sub(start))
+
+			Db.UpdateSession(&session)
+		}
 	}
+
+	Db.TableCreate("hours", noti)
+	Db.RowAppend("hours", noti)
 
 	if *breakCmd != "" {
-		//Parse and handle hour
 	}
 	if *graphCmd != "" {
-
 	}
 }
 
-func handleLoginCmd(noti Notification) {
+func PostNotification(info ...string) {
 
-	Db.TableCreate("hours", noti)
-	Db.RowAppend("hours", noti)
-}
+	var label string
 
-func handleLogoutCmd(noti Notification) {
+	for _, v := range info {
+		label += v + "\n"
+	}
 
-	Db.TableCreate("hours", noti)
-	Db.RowAppend("hours", noti)
-
-	noti, _ = Db.RowGetLast("hours")
-	fmt.Println("last", noti)
-}
-
-func timeToSimpleFormat(t time.Time) string {
-
-	format := fmt.Sprintf("%02d:%02d", t.Hour(), t.Minute())
-
-	return format
+	notification := NewGnomeNotification("", "DayWatch", label)
+	err := notification.Notify()
+	if err != nil {
+		fmt.Errorf("Posting notification failed:", err.Error())
+	}
 }
