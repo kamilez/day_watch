@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
+	"log"
 	"time"
 )
 
@@ -61,11 +61,15 @@ func main() {
 
 	Db = NewDatabase(DATABASE_PATH)
 	if Db == nil {
-		os.Exit(1)
+		log.Fatalln("Could not create database")
 	}
 
 	now := time.Now()
-	noti := Notification{Type: "", Time: now.Format(DEFAULT_TIME_FORMAT), Date: now.Format(DEFAULT_DATE_FORMAT)}
+	noti := Notification{
+		Type: "",
+		Time: now.Format(DEFAULT_TIME_FORMAT),
+		Date: now.Format(DEFAULT_DATE_FORMAT),
+	}
 
 	if *loginCmd == true {
 		noti.Type = string(LOGIN)
@@ -82,15 +86,12 @@ func main() {
 
 		total, err := Db.GetWorkedHours(session)
 		if err != nil {
-			fmt.Errorf("Getting worked hours failed: %v", err)
-			os.Exit(1)
+			log.Fatalln("Getting worked hours failed: ", err.Error())
 		}
 
 		firstActivity, err := Db.GetFirstActivity(session)
 		if err != nil {
-			fmt.Errorf("Getting first activity failed: %v", err)
-			fmt.Println("asdsa")
-			os.Exit(1)
+			log.Fatalln("Getting first activity failed: ", err.Error())
 		}
 
 		leaveTime := firstActivity.Add(8 * time.Hour)
@@ -106,15 +107,14 @@ func main() {
 
 		session, err := Db.GetLastSession()
 		if err != nil {
-			fmt.Errorf("Getting last session failed: %v", err)
-			os.Exit(1)
+			log.Fatalln("Getting last session failed: ", err.Error())
 		}
 
 		if session.Stop == "" {
 
 			start, err := time.Parse(DEFAULT_TIME_FORMAT, session.Start)
 			if err != nil {
-				fmt.Errorf("Parsing string to time format failed: %v", err)
+				log.Fatalln("Parsing string to time format failed: ", err.Error())
 			}
 
 			session.Stop = now.Format(DEFAULT_TIME_FORMAT)
