@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
+	"log"
 	"reflect"
 	"time"
 )
@@ -17,61 +18,51 @@ type Database struct {
 func NewDatabase(path string) *Database {
 
 	db, err := sql.Open("sqlite3", path)
-	if err != nil {
-		fmt.Errorf("Creating database failed:", err.Error())
-		return nil
-	}
+	ErrorCheck(err)
 
 	return &Database{db, path}
 }
 
 func (db *Database) TableCreate(name string, obj interface{}) error {
 
-	_type := reflect.TypeOf(obj)
-
 	var query bytes.Buffer
+
 	query.WriteString("CREATE TABLE IF NOT EXISTS '" + name + "' (id INTEGER PRIMARY KEY AUTOINCREMENT")
 
-	for i := 0; i < _type.NumField(); i++ {
-
-		query.WriteString(", " + _type.Field(i).Name + " " + _type.Field(i).Tag.Get("sql"))
+	typeOf := reflect.TypeOf(obj)
+	for i := 0; i < typeOf.NumField(); i++ {
+		query.WriteString(", " + typeOf.Field(i).Name + " " + typeOf.Field(i).Tag.Get("sql"))
 	}
-
 	query.WriteString(")")
 
-	fmt.Println("Query: ", query.String())
+	log.Println("Table create query: ", query.String())
 
 	stmt, err := db.db.Prepare(query.String())
-	if err != nil {
-		fmt.Errorf("Table creation failed:", err.Error())
-		return err
-	}
+	ErrorCheck(err)
 
 	_, err = stmt.Exec()
+	ErrorCheck(err)
 
 	return err
 }
 
 func (db *Database) RowAppend(name string, obj interface{}) error {
 
-	_type := reflect.TypeOf(obj)
-
 	var query bytes.Buffer
 
 	query.WriteString("INSERT INTO '" + name + "' (")
 
-	for i := 0; i < _type.NumField(); i++ {
+	typeOf := reflect.TypeOf(obj)
+	for i := 0; i < typeOf.NumField(); i++ {
 
-		query.WriteString(_type.Field(i).Name)
-		if i != _type.NumField()-1 {
+		query.WriteString(typeOf.Field(i).Name)
+		if i != typeOf.NumField()-1 {
 			query.WriteString(", ")
 		}
 	}
-
 	query.WriteString(") VALUES (")
 
-	for i := 0; i < _type.NumField(); i++ {
-
+	for i := 0; i < typeOf.NumField(); i++ {
 		str := fmt.Sprintf("%v", reflect.ValueOf(obj).Field(i).Interface())
 
 		switch reflect.ValueOf(obj).Field(i).Interface().(type) {
@@ -81,21 +72,19 @@ func (db *Database) RowAppend(name string, obj interface{}) error {
 			query.WriteString(str)
 		}
 
-		if i != _type.NumField()-1 {
+		if i != typeOf.NumField()-1 {
 			query.WriteString(", ")
 		}
 	}
-
 	query.WriteString(")")
 
+	log.Println("Query: ", query.String())
+
 	stmt, err := db.db.Prepare(query.String())
-	fmt.Println("Query: ", query.String())
-	if err != nil {
-		fmt.Errorf("Table creation failed:", err.Error())
-		return err
-	}
+	ErrorCheck(err)
 
 	_, err = stmt.Exec()
+	ErrorCheck(err)
 
 	return err
 }
@@ -103,23 +92,18 @@ func (db *Database) RowAppend(name string, obj interface{}) error {
 func (db *Database) GetLastNotification() (Notification, error) {
 
 	query := "SELECT * FROM 'hours' WHERE ID = (SELECT MAX(ID) FROM 'hours')"
-	fmt.Println("Query: ", query)
+	log.Println("Query: ", query)
 
 	rows, err := db.db.Query(query)
+	ErrorCheck(err)
+
 	defer rows.Close()
-	if err != nil {
-		fmt.Errorf("Error: ", err.Error())
-		return Notification{}, err
-	}
 
 	noti := Notification{}
+	var id int
 	for rows.Next() {
-		var id int
 		err = rows.Scan(&id, &noti.Type, &noti.Time)
-		if err != nil {
-			fmt.Errorf("Error: ", err.Error())
-			return Notification{}, err
-		}
+		ErrorCheck(err)
 	}
 
 	return noti, err
@@ -128,23 +112,17 @@ func (db *Database) GetLastNotification() (Notification, error) {
 func (db *Database) GetLastSession() (Session, error) {
 
 	query := "SELECT * FROM 'sessions' WHERE ID = (SELECT MAX(ID) FROM 'sessions')"
-	fmt.Println("Query: ", query)
+	log.Println("Select last session query: ", query)
 
 	rows, err := db.db.Query(query)
+	ErrorCheck(err)
 	defer rows.Close()
-	if err != nil {
-		fmt.Errorf("Error: ", err.Error())
-		return Session{}, err
-	}
 
 	session := Session{}
+	var id int
 	for rows.Next() {
-		var id int
 		err = rows.Scan(&id, &session.Start, &session.Stop, &session.Date, &session.Length)
-		if err != nil {
-			fmt.Errorf("Error: %s", err.Error())
-			return Session{}, err
-		}
+		ErrorCheck(err)
 	}
 
 	return session, err
@@ -155,48 +133,29 @@ func (db *Database) UpdateSession(session *Session) error {
 	query := fmt.Sprintf("UPDATE 'sessions' SET STOP = '%s', LENGTH = '%d' WHERE START = '%s' AND DATE = '%s'",
 		session.Stop, session.Length, session.Start, session.Date)
 
-	fmt.Println(query)
+	log.Println("Update session query: ", query)
 
 	stmt, err := db.db.Prepare(query)
-	if err != nil {
-		fmt.Println("Query preparation failed")
-		fmt.Errorf(err.Error())
-		return err
-	}
+	ErrorCheck(err)
 
 	_, err = stmt.Exec()
-	if err != nil {
-		fmt.Println("Query execution failed")
-		fmt.Errorf("", err.Error())
-		return err
-	}
+	ErrorCheck(err)
 
 	return nil
 }
 
 func (db *Database) GetWorkedHours(session Session) (time.Time, error) {
 
-	query := fmt.Sprintf("SELECT * FROM 'sessions' WHERE DATE = '%s'", session.Date)
-
-	rows, err := db.db.Query(query)
+	rows, err := db.db.Query("SELECT * FROM 'sessions' WHERE DATE = ?", session.Date)
+	ErrorCheck(err)
 	defer rows.Close()
-	if err != nil {
-		fmt.Errorf("Error: ", err.Error())
-		return time.Time{}, err
-	}
-
-	var totalMinutes int
 
 	sn := Session{}
-	var id int
+	var id, totalMinutes int
 
 	for rows.Next() {
 		err = rows.Scan(&id, &sn.Start, &sn.Stop, &sn.Date, &sn.Length)
-		fmt.Println(sn.Length)
-		if err != nil {
-			fmt.Errorf("Error: %s", err.Error())
-			return time.Time{}, err
-		}
+		ErrorCheck(err)
 
 		totalMinutes += sn.Length
 	}
@@ -206,34 +165,21 @@ func (db *Database) GetWorkedHours(session Session) (time.Time, error) {
 
 func (db *Database) GetFirstActivity(session Session) (time.Time, error) {
 
-	query := fmt.Sprintf("SELECT * FROM 'sessions' WHERE DATE = '%s' ORDER BY ID LIMIT 1", session.Date)
-	fmt.Println("Query: ", query)
-
-	rows, err := db.db.Query(query)
+	rows, err := db.db.Query("SELECT * FROM 'sessions' WHERE DATE = ? ORDER BY ID LIMIT 1",
+		session.Date)
+	ErrorCheck(err)
 	defer rows.Close()
-	if err != nil {
-		fmt.Errorf("Error: ", err.Error())
-		return time.Time{}, err
-	}
 
 	sn := Session{}
 	var id int
 
 	for rows.Next() {
 		err = rows.Scan(&id, &sn.Start, &sn.Stop, &sn.Date, &sn.Length)
-		if err != nil {
-			fmt.Println("asdsad")
-			fmt.Errorf("Error: %s", err.Error())
-			return time.Time{}, err
-		}
+		ErrorCheck(err)
 	}
 
 	formattedTime, err := time.Parse(DEFAULT_TIME_FORMAT, sn.Start)
-	if err != nil {
-		fmt.Println("asdsadasdsada")
-		fmt.Errorf("Error: ", err.Error())
-		return time.Time{}, err
-	}
+	ErrorCheck(err)
 
 	return formattedTime, nil
 }

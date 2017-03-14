@@ -1,1 +1,1 @@
-go run main.go notifier.go database.go --login
+go run main.go tools.go notifier.go database.go --login
