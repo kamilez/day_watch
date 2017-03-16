@@ -4,15 +4,17 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os/user"
 	"time"
 )
 
 var (
-	loginCmd  *bool
-	logoutCmd *bool
+	loginCmd     *bool
+	logoutCmd    *bool
+	breakCmd     *bool
+	notification *bool
 
 	imageCmd *string
-	breakCmd *string
 	graphCmd *string
 )
 
@@ -24,23 +26,25 @@ const (
 	LOGOUT LogType = "O"
 )
 
-type Notification struct {
-	Type string `sql:"TEXT NOT NULL"`
-	Time string `sql:"TEXT NOT NULL"`
-	Date string `sql:"TEXT NOT NULL"`
+type Activity struct {
+	Start string `sql:"TEXT NOT NULL"`
+	Stop  string `sql:"TEXT NOT NULL"`
+	Date  string `sql:"TEXT NOT NULL"`
+	Type  string `sql:"TEXT NOT NULL"`
 }
 
-type Session struct {
-	Start  string `sql:"TEXT NOT NULL"`
-	Stop   string `sql:"TEXT NOT NULL"`
-	Date   string `sql:"TEXT NOT NULL"`
-	Length int    `sql:"INT"`
-}
+const (
+	DEFAULT_TIME_FORMAT = "15:04:05"
+	DEFAULT_DATE_FORMAT = "02/01/2006"
 
-const DATABASE_PATH = "/home/kamil/Documents/working_hours.db"
-const DEFAULT_TIME_FORMAT = "15:04:05"
-const DEFAULT_DATE_FORMAT = "02/01/2006"
+	WORKING_HOURS_LENGTH = 8
 
+	ACTIVITY_TYPE_SESSION = "session"
+	ACTIVITY_TYPE_BREAK   = "break"
+)
+
+var IMAGE_PATH string
+var DATABASE_PATH string
 var Db *Database
 
 func init() {
@@ -51,10 +55,18 @@ func init() {
 		"register logout from system")
 	graphCmd = flag.String("graph", "",
 		"create graph image with working hours and breaks, enter the image path")
-	breakCmd = flag.String("break", "",
-		`set break hours in "hh:mm format"`)
+	breakCmd = flag.Bool(ACTIVITY_TYPE_BREAK, false,
+		`set break from the next logout to the following login`)
+	notification = flag.Bool("notify", false,
+		`show time notification`)
 
 	flag.Parse()
+
+	usr, err := user.Current()
+	ErrorCheck(err)
+
+	DATABASE_PATH = usr.HomeDir + "/Documents/working_hours.db"
+	IMAGE_PATH = usr.HomeDir + "/Documents/busy_beaver.png"
 }
 
 func main() {
@@ -65,87 +77,81 @@ func main() {
 	}
 
 	now := time.Now()
-	noti := Notification{
-		Type: "",
-		Time: now.Format(DEFAULT_TIME_FORMAT),
-		Date: now.Format(DEFAULT_DATE_FORMAT),
+	nowTimeString := now.Format(DEFAULT_TIME_FORMAT)
+	nowDateString := now.Format(DEFAULT_DATE_FORMAT)
+
+	activity := Activity{
+		Start: nowTimeString,
+		Stop:  "",
+		Date:  nowDateString,
 	}
 
-	if *loginCmd == true {
-		noti.Type = string(LOGIN)
+	Db.TableCreate("activities", activity)
 
-		session := Session{
-			Start:  now.Format(DEFAULT_TIME_FORMAT),
-			Stop:   "",
-			Date:   now.Format(DEFAULT_DATE_FORMAT),
-			Length: 0,
-		}
+	if *loginCmd == true || *notification == true {
 
-		Db.TableCreate("sessions", session)
-		Db.RowAppend("sessions", session)
+		PostNotification(nowDateString)
 
-		total, err := Db.GetWorkedHours(session)
-		if err != nil {
-			log.Fatalln("Getting worked hours failed: ", err.Error())
-		}
-
-		firstActivity, err := Db.GetFirstActivity(session)
-		if err != nil {
-			log.Fatalln("Getting first activity failed: ", err.Error())
-		}
-
-		leaveTime := firstActivity.Add(8 * time.Hour)
-
-		PostNotification(
-			"Started:\t"+firstActivity.Format("15:04"),
-			"Worked:\t"+total.Format("15:04"),
-			"Leave:\t\t"+leaveTime.Format("15:04"),
-		)
-
-	} else if *logoutCmd == true {
-		noti.Type = string(LOGOUT)
-
-		session, err := Db.GetLastSession()
-		if err != nil {
-			log.Fatalln("Getting last session failed: ", err.Error())
-		}
-
-		if session.Stop == "" {
-
-			start, err := time.Parse(DEFAULT_TIME_FORMAT, session.Start)
-			if err != nil {
-				log.Fatalln("Parsing string to time format failed: ", err.Error())
+		if *loginCmd == true {
+			activity.Type = ACTIVITY_TYPE_SESSION
+			lastBreak, err := Db.LastActivity(nowDateString, ACTIVITY_TYPE_BREAK)
+			ErrorCheck(err)
+			if lastBreak.Stop == "" {
+				lastBreak.Stop = now.Format(DEFAULT_TIME_FORMAT)
+				Db.UpdateActivityStopTime(lastBreak)
 			}
 
-			session.Stop = now.Format(DEFAULT_TIME_FORMAT)
-			session.Length =
-				now.Hour()*60 + now.Minute() - start.Hour()*60 - start.Minute()
-			//session.Length = int(now.Sub(start))
-
-			Db.UpdateSession(&session)
+			Db.RowAppend("activities", activity)
 		}
-	}
+	} else if *logoutCmd == true {
 
-	Db.TableCreate("hours", noti)
-	Db.RowAppend("hours", noti)
+		lastActivity, err := Db.LastActivity(nowDateString, ACTIVITY_TYPE_SESSION)
+		ErrorCheck(err)
+		if lastActivity.Stop == "" {
+			lastActivity.Stop = nowTimeString
+			Db.UpdateActivityStopTime(lastActivity)
+		}
 
-	if *breakCmd != "" {
-	}
-	if *graphCmd != "" {
+		lastActivity, err = Db.LastActivity(nowDateString, ACTIVITY_TYPE_BREAK)
+		ErrorCheck(err)
+		if lastActivity.Start == "" {
+			lastActivity.Start = nowTimeString
+			Db.UpdateActivityStartTime(lastActivity)
+		}
+
+	} else if *breakCmd == true {
+		activity.Type = ACTIVITY_TYPE_BREAK
+		activity.Start = ""
+
+		Db.RowAppend("activities", activity)
 	}
 }
 
-func PostNotification(info ...string) {
+func PostNotification(nowDate string) {
 
-	var label string
+	breaks, err := Db.BreakHours(nowDate)
+	ErrorCheck(err)
 
-	for _, v := range info {
-		label += v + "\n"
+	firstActivity, err := Db.FirstActivity(
+		nowDate, ACTIVITY_TYPE_SESSION)
+	ErrorCheck(err)
+
+	firstActivityStartTime, err := time.Parse(DEFAULT_TIME_FORMAT, firstActivity.Start)
+	ErrorCheck(err)
+
+	leaveTime := firstActivityStartTime.Add(WORKING_HOURS_LENGTH*time.Hour + breaks)
+
+	total, err := Db.SessionHours(nowDate)
+	ErrorCheck(err)
+
+	label := []string{
+		"Started:\t" + firstActivityStartTime.Format("15:04"),
+		"Leave:\t\t" + leaveTime.Format("15:04"),
+		"Work time:\t" + fmt.Sprintf("%02d:%02d",
+			int(total.Hours()), int(total.Minutes())%60),
 	}
 
-	notification := NewGnomeNotification("", "DayWatch", label)
-	err := notification.Notify()
-	if err != nil {
-		fmt.Errorf("Posting notification failed:", err.Error())
-	}
+	notification := NewGnomeNotification("", "DayWatch", label...)
+
+	notification.Notify()
 }

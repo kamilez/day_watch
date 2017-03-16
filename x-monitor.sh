@@ -5,9 +5,9 @@ dbus-monitor --session "type='signal',interface='com.ubuntu.Upstart0_6'" | \
 	while true; do
 		read X
 		if echo $X | grep "desktop-lock" &> /dev/null; then
-			daywatch --logout
+			day_watch --logout
 		elif echo $X | grep "desktop-unlock" &> /dev/null; then
-			daywatch --login
+			day_watch --login
 		fi
 	done
 )

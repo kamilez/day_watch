@@ -10,7 +10,7 @@ description "Desktop Open Task"
 start on desktop-start
 task
 script
-daywatch --login
+day_watch --login
 nohup x-monitor.sh &
 end script
 EOT
@@ -23,6 +23,8 @@ description "Desktop Close Task"
 start on session-end
 task
 script
-daywatch --logout
+day_watch --logout
 end script
 EOT
+
+cp ./x-monitor.sh $GOPATH/bin

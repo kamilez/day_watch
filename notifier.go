@@ -5,8 +5,6 @@ import (
 	"os/exec"
 )
 
-const IMAGE_PATH = "/home/kamil/Documents/busy_beaver.png"
-
 type Notifier interface {
 	Notify() error
 }
@@ -22,7 +20,7 @@ func NewGnomeNotification(image string, title string, info ...string) Notifier {
 
 	var information string
 	for _, v := range info {
-		information += v
+		information += v + "\n"
 	}
 
 	notify.Init("daywatch")

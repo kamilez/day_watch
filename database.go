@@ -89,49 +89,70 @@ func (db *Database) RowAppend(name string, obj interface{}) error {
 	return err
 }
 
-func (db *Database) GetLastNotification() (Notification, error) {
+func (db *Database) FirstActivity(date string, activityType string) (Activity, error) {
 
-	query := "SELECT * FROM 'hours' WHERE ID = (SELECT MAX(ID) FROM 'hours')"
-	log.Println("Query: ", query)
-
-	rows, err := db.db.Query(query)
-	ErrorCheck(err)
-
-	defer rows.Close()
-
-	noti := Notification{}
-	var id int
-	for rows.Next() {
-		err = rows.Scan(&id, &noti.Type, &noti.Time)
-		ErrorCheck(err)
-	}
-
-	return noti, err
-}
-
-func (db *Database) GetLastSession() (Session, error) {
-
-	query := "SELECT * FROM 'sessions' WHERE ID = (SELECT MAX(ID) FROM 'sessions')"
-	log.Println("Select last session query: ", query)
-
-	rows, err := db.db.Query(query)
+	rows, err := db.db.Query(`
+		SELECT start, stop, type
+		FROM 'activities'
+		WHERE date = ? AND type = ?
+		ORDER BY ID LIMIT 1`,
+		date, activityType,
+	)
 	ErrorCheck(err)
 	defer rows.Close()
 
-	session := Session{}
-	var id int
+	activity := Activity{}
 	for rows.Next() {
-		err = rows.Scan(&id, &session.Start, &session.Stop, &session.Date, &session.Length)
+		err = rows.Scan(&activity.Start, &activity.Stop, &activity.Type)
 		ErrorCheck(err)
 	}
 
-	return session, err
+	return activity, nil
 }
 
-func (db *Database) UpdateSession(session *Session) error {
+func (db *Database) LastActivity(date string, activityType string) (Activity, error) {
 
-	query := fmt.Sprintf("UPDATE 'sessions' SET STOP = '%s', LENGTH = '%d' WHERE START = '%s' AND DATE = '%s'",
-		session.Stop, session.Length, session.Start, session.Date)
+	rows, err := db.db.Query(
+		`SELECT Start, Stop
+		FROM 'activities' WHERE id = (SELECT MAX(ID)
+		FROM 'activities' WHERE type = ? AND date = ?)`,
+		activityType, date,
+	)
+	ErrorCheck(err)
+	defer rows.Close()
+
+	activity := Activity{Date: date, Type: activityType}
+	for rows.Next() {
+		err = rows.Scan(&activity.Start, &activity.Stop)
+		ErrorCheck(err)
+
+	}
+
+	return activity, err
+}
+
+func (db *Database) UpdateActivityStartTime(activity Activity) error {
+
+	query := fmt.Sprintf(
+		`UPDATE 'activities'
+		SET start = '%s'
+		WHERE id = (SELECT MAX(ID)
+		FROM 'activities' WHERE type = '%s' AND date = '%s')`,
+		activity.Start, activity.Type, activity.Date,
+	)
+
+	return Db.updateActivity(query, activity)
+}
+
+func (db *Database) UpdateActivityStopTime(activity Activity) error {
+
+	query := fmt.Sprintf("UPDATE 'activities' SET stop = '%s' WHERE start = '%s' AND date = '%s'",
+		activity.Stop, activity.Start, activity.Date)
+
+	return Db.updateActivity(query, activity)
+}
+
+func (db *Database) updateActivity(query string, activity Activity) error {
 
 	log.Println("Update session query: ", query)
 
@@ -144,42 +165,72 @@ func (db *Database) UpdateSession(session *Session) error {
 	return nil
 }
 
-func (db *Database) GetWorkedHours(session Session) (time.Time, error) {
+func (db *Database) hours(query string, date string) (time.Duration, error) {
 
-	rows, err := db.db.Query("SELECT * FROM 'sessions' WHERE DATE = ?", session.Date)
+	rows, err := db.db.Query(query, date)
 	ErrorCheck(err)
 	defer rows.Close()
 
-	sn := Session{}
-	var id, totalMinutes int
+	var duration time.Duration
+	var start, stop string
+	var startTime, stopTime time.Time
 
 	for rows.Next() {
-		err = rows.Scan(&id, &sn.Start, &sn.Stop, &sn.Date, &sn.Length)
+		err = rows.Scan(&start, &stop)
 		ErrorCheck(err)
 
-		totalMinutes += sn.Length
+		if start == "" || stop == "" {
+			continue
+		}
+
+		startTime, err = time.Parse(DEFAULT_TIME_FORMAT, start)
+		if err != nil {
+			continue
+		}
+
+		stopTime, err = time.Parse(DEFAULT_TIME_FORMAT, stop)
+		if err != nil {
+			continue
+		}
+
+		duration += stopTime.Sub(startTime)
 	}
 
-	return time.Time{}.Add(time.Duration(totalMinutes) * time.Minute), nil
+	return duration, nil
 }
 
-func (db *Database) GetFirstActivity(session Session) (time.Time, error) {
+func (db *Database) SessionHours(date string) (time.Duration, error) {
+	return db.hours("SELECT start, stop FROM 'activities' WHERE DATE = ? AND type = 'session'", date)
+}
 
-	rows, err := db.db.Query("SELECT * FROM 'sessions' WHERE DATE = ? ORDER BY ID LIMIT 1",
-		session.Date)
+func (db *Database) BreakHours(date string) (time.Duration, error) {
+
+	return db.hours("SELECT start, stop FROM 'activities' WHERE DATE = ? AND type = 'break'", date)
+}
+
+func (db *Database) Activities(date, typeOf string) ([]Activity, error) {
+
+	rows, err := Db.db.Query(
+		"SELECT start, stop FROM 'activities' WHERE type = ? AND date = ? ORDER BY id",
+		typeOf, date,
+	)
 	ErrorCheck(err)
 	defer rows.Close()
 
-	sn := Session{}
-	var id int
+	activities := make([]Activity, 0)
 
 	for rows.Next() {
-		err = rows.Scan(&id, &sn.Start, &sn.Stop, &sn.Date, &sn.Length)
-		ErrorCheck(err)
+
+		activity := &Activity{}
+
+		activity.Type = typeOf
+		activity.Date = date
+		rows.Scan(&activity.Start, &activity.Stop)
+
+		activities = append(activities, *activity)
 	}
 
-	formattedTime, err := time.Parse(DEFAULT_TIME_FORMAT, sn.Start)
-	ErrorCheck(err)
+	log.Println(activities)
 
-	return formattedTime, nil
+	return activities, nil
 }
