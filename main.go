@@ -90,8 +90,6 @@ func main() {
 
 	if *loginCmd == true || *notification == true {
 
-		PostNotification(nowDateString)
-
 		if *loginCmd == true {
 			activity.Type = ACTIVITY_TYPE_SESSION
 			lastBreak, err := Db.LastActivity(nowDateString, ACTIVITY_TYPE_BREAK)
@@ -103,6 +101,9 @@ func main() {
 
 			Db.RowAppend("activities", activity)
 		}
+
+		PostNotification(now)
+
 	} else if *logoutCmd == true {
 
 		lastActivity, err := Db.LastActivity(nowDateString, ACTIVITY_TYPE_SESSION)
@@ -127,22 +128,32 @@ func main() {
 	}
 }
 
-func PostNotification(nowDate string) {
+func PostNotification(now time.Time) {
+
+	nowDate := now.Format(DEFAULT_DATE_FORMAT)
 
 	breaks, err := Db.BreakHours(nowDate)
 	ErrorCheck(err)
 
-	firstActivity, err := Db.FirstActivity(
-		nowDate, ACTIVITY_TYPE_SESSION)
+	firstActivity, err := Db.FirstActivity(nowDate, ACTIVITY_TYPE_SESSION)
 	ErrorCheck(err)
-
 	firstActivityStartTime, err := time.Parse(DEFAULT_TIME_FORMAT, firstActivity.Start)
 	ErrorCheck(err)
 
 	leaveTime := firstActivityStartTime.Add(WORKING_HOURS_LENGTH*time.Hour + breaks)
-
 	total, err := Db.SessionHours(nowDate)
 	ErrorCheck(err)
+
+	if *notification == true {
+
+		lastActivity, err := Db.LastActivity(nowDate, ACTIVITY_TYPE_SESSION)
+		ErrorCheck(err)
+		lastActivityTime, err := time.Parse(DEFAULT_TIME_FORMAT, lastActivity.Start)
+		ErrorCheck(err)
+
+		total += time.Duration(now.Hour()-lastActivityTime.Hour())*time.Hour +
+			time.Duration(now.Minute()-lastActivityTime.Minute())*time.Minute
+	}
 
 	label := []string{
 		"Started:\t" + firstActivityStartTime.Format("15:04"),
@@ -152,6 +163,5 @@ func PostNotification(nowDate string) {
 	}
 
 	notification := NewGnomeNotification("", "DayWatch", label...)
-
 	notification.Notify()
 }
