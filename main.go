@@ -13,6 +13,7 @@ var (
 	logoutCmd    *bool
 	breakCmd     *bool
 	notification *bool
+	statusCmd    *bool
 
 	imageCmd *string
 	graphCmd *string
@@ -59,6 +60,8 @@ func init() {
 		`set break from the next logout to the following login`)
 	notification = flag.Bool("notify", false,
 		`show time notification`)
+	statusCmd = flag.Bool("status", false,
+		`show working hours status`)
 
 	flag.Parse()
 
@@ -125,6 +128,26 @@ func main() {
 		activity.Start = ""
 
 		Db.RowAppend("activities", activity)
+	} else if *statusCmd == true {
+		activities, err := Db.Activities(nowDateString)
+		ErrorCheck(err)
+
+		if len(activities) == 0 {
+			activities, err =
+				Db.Activities(now.AddDate(0, 0, -1).Format(DEFAULT_DATE_FORMAT))
+			ErrorCheck(err)
+		}
+
+		if len(activities) == 0 {
+			fmt.Println("Empty data")
+			return
+		}
+
+		fmt.Println("ID\tTYPE\t\tSTART\t\tSTOP\t\tDATE")
+		for k, v := range activities {
+			fmt.Printf("%d\t%s\t\t%s\t%s\t%s\n",
+				k, v.Type, v.Start, v.Stop, v.Date)
+		}
 	}
 }
 

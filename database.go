@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
-	"log"
 	"reflect"
 	"time"
 )
@@ -34,8 +33,6 @@ func (db *Database) TableCreate(name string, obj interface{}) error {
 		query.WriteString(", " + typeOf.Field(i).Name + " " + typeOf.Field(i).Tag.Get("sql"))
 	}
 	query.WriteString(")")
-
-	log.Println("Table create query: ", query.String())
 
 	stmt, err := db.db.Prepare(query.String())
 	ErrorCheck(err)
@@ -77,8 +74,6 @@ func (db *Database) RowAppend(name string, obj interface{}) error {
 		}
 	}
 	query.WriteString(")")
-
-	log.Println("Query: ", query.String())
 
 	stmt, err := db.db.Prepare(query.String())
 	ErrorCheck(err)
@@ -154,8 +149,6 @@ func (db *Database) UpdateActivityStopTime(activity Activity) error {
 
 func (db *Database) updateActivity(query string, activity Activity) error {
 
-	log.Println("Update session query: ", query)
-
 	stmt, err := db.db.Prepare(query)
 	ErrorCheck(err)
 
@@ -208,11 +201,11 @@ func (db *Database) BreakHours(date string) (time.Duration, error) {
 	return db.hours("SELECT start, stop FROM 'activities' WHERE DATE = ? AND type = 'break'", date)
 }
 
-func (db *Database) Activities(date, typeOf string) ([]Activity, error) {
+func (db *Database) Activities(date string) ([]Activity, error) {
 
 	rows, err := Db.db.Query(
-		"SELECT start, stop FROM 'activities' WHERE type = ? AND date = ? ORDER BY id",
-		typeOf, date,
+		"SELECT type, start, stop FROM 'activities' WHERE date = ? ORDER BY id",
+		date,
 	)
 	ErrorCheck(err)
 	defer rows.Close()
@@ -223,14 +216,11 @@ func (db *Database) Activities(date, typeOf string) ([]Activity, error) {
 
 		activity := &Activity{}
 
-		activity.Type = typeOf
+		rows.Scan(&activity.Type, &activity.Start, &activity.Stop)
 		activity.Date = date
-		rows.Scan(&activity.Start, &activity.Stop)
 
 		activities = append(activities, *activity)
 	}
-
-	log.Println(activities)
 
 	return activities, nil
 }
