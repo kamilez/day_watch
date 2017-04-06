@@ -127,6 +127,13 @@ func main() {
 		activity.Type = ACTIVITY_TYPE_BREAK
 		activity.Start = ""
 
+		activites, err := Db.Activities(nowDateString)
+		ErrorCheck(err)
+
+		if activites[len(activites)-1].Type == ACTIVITY_TYPE_BREAK {
+			return
+		}
+
 		Db.RowAppend("activities", activity)
 	} else if *statusCmd == true {
 		activities, err := Db.Activities(nowDateString)
