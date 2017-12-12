@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/kamilez/day_watch/data"
+	"github.com/kamilez/day_watch/utils"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/n4lik/day_watch/data"
-	"github.com/n4lik/day_watch/utils"
 )
 
 type Database struct {

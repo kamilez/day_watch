@@ -5,9 +5,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/n4lik/day_watch/data"
-	db "github.com/n4lik/day_watch/database"
-	. "github.com/n4lik/day_watch/utils"
+	"github.com/kamilez/day_watch/data"
+	db "github.com/kamilez/day_watch/database"
+	. "github.com/kamilez/day_watch/utils"
 )
 
 type App struct {

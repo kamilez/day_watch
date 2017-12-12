@@ -5,9 +5,9 @@ import (
 	"log"
 	"os/user"
 
-	"github.com/n4lik/day_watch/app"
-	db "github.com/n4lik/day_watch/database"
-	"github.com/n4lik/day_watch/utils"
+	"github.com/kamilez/day_watch/app"
+	db "github.com/kamilez/day_watch/database"
+	"github.com/kamilez/day_watch/utils"
 )
 
 var (
