@@ -1,12 +1,16 @@
-package main
+package database
 
 import (
 	"bytes"
 	"database/sql"
 	"fmt"
-	_ "github.com/mattn/go-sqlite3"
+	"log"
 	"reflect"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/n4lik/day_watch/data"
+	"github.com/n4lik/day_watch/utils"
 )
 
 type Database struct {
@@ -17,7 +21,9 @@ type Database struct {
 func NewDatabase(path string) *Database {
 
 	db, err := sql.Open("sqlite3", path)
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 
 	return &Database{db, path}
 }
@@ -35,10 +41,14 @@ func (db *Database) TableCreate(name string, obj interface{}) error {
 	query.WriteString(")")
 
 	stmt, err := db.db.Prepare(query.String())
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 
 	_, err = stmt.Exec()
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 
 	return err
 }
@@ -76,15 +86,19 @@ func (db *Database) RowAppend(name string, obj interface{}) error {
 	query.WriteString(")")
 
 	stmt, err := db.db.Prepare(query.String())
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 
 	_, err = stmt.Exec()
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 
 	return err
 }
 
-func (db *Database) FirstActivity(date string, activityType string) (Activity, error) {
+func (db *Database) FirstActivity(date string, activityType string) (data.Activity, error) {
 
 	rows, err := db.db.Query(`
 		SELECT start, stop, type
@@ -93,19 +107,23 @@ func (db *Database) FirstActivity(date string, activityType string) (Activity, e
 		ORDER BY ID LIMIT 1`,
 		date, activityType,
 	)
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 	defer rows.Close()
 
-	activity := Activity{}
+	activity := data.Activity{}
 	for rows.Next() {
 		err = rows.Scan(&activity.Start, &activity.Stop, &activity.Type)
-		ErrorCheck(err)
+		if err != nil {
+			log.Panic(err.Error())
+		}
 	}
 
 	return activity, nil
 }
 
-func (db *Database) LastActivity(date string, activityType string) (Activity, error) {
+func (db *Database) LastActivity(date string, activityType string) (data.Activity, error) {
 
 	rows, err := db.db.Query(
 		`SELECT Start, Stop
@@ -113,20 +131,24 @@ func (db *Database) LastActivity(date string, activityType string) (Activity, er
 		FROM 'activities' WHERE type = ? AND date = ?)`,
 		activityType, date,
 	)
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 	defer rows.Close()
 
-	activity := Activity{Date: date, Type: activityType}
+	activity := data.Activity{Date: date, Type: activityType}
 	for rows.Next() {
 		err = rows.Scan(&activity.Start, &activity.Stop)
-		ErrorCheck(err)
+		if err != nil {
+			log.Panic(err.Error())
+		}
 
 	}
 
 	return activity, err
 }
 
-func (db *Database) UpdateActivityStartTime(activity Activity) error {
+func (db *Database) UpdateActivityStartTime(activity data.Activity) error {
 
 	query := fmt.Sprintf(
 		`UPDATE 'activities'
@@ -136,24 +158,28 @@ func (db *Database) UpdateActivityStartTime(activity Activity) error {
 		activity.Start, activity.Type, activity.Date,
 	)
 
-	return Db.updateActivity(query, activity)
+	return db.updateActivity(query, activity)
 }
 
-func (db *Database) UpdateActivityStopTime(activity Activity) error {
+func (db *Database) UpdateActivityStopTime(activity data.Activity) error {
 
 	query := fmt.Sprintf("UPDATE 'activities' SET stop = '%s' WHERE start = '%s' AND date = '%s'",
 		activity.Stop, activity.Start, activity.Date)
 
-	return Db.updateActivity(query, activity)
+	return db.updateActivity(query, activity)
 }
 
-func (db *Database) updateActivity(query string, activity Activity) error {
+func (db *Database) updateActivity(query string, activity data.Activity) error {
 
 	stmt, err := db.db.Prepare(query)
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 
 	_, err = stmt.Exec()
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 
 	return nil
 }
@@ -161,7 +187,9 @@ func (db *Database) updateActivity(query string, activity Activity) error {
 func (db *Database) hours(query string, date string) (time.Duration, error) {
 
 	rows, err := db.db.Query(query, date)
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 	defer rows.Close()
 
 	var duration time.Duration
@@ -170,18 +198,20 @@ func (db *Database) hours(query string, date string) (time.Duration, error) {
 
 	for rows.Next() {
 		err = rows.Scan(&start, &stop)
-		ErrorCheck(err)
+		if err != nil {
+			log.Panic(err.Error())
+		}
 
 		if start == "" || stop == "" {
 			continue
 		}
 
-		startTime, err = time.Parse(DEFAULT_TIME_FORMAT, start)
+		startTime, err = time.Parse(utils.DEFAULT_TIME_FORMAT, start)
 		if err != nil {
 			continue
 		}
 
-		stopTime, err = time.Parse(DEFAULT_TIME_FORMAT, stop)
+		stopTime, err = time.Parse(utils.DEFAULT_TIME_FORMAT, stop)
 		if err != nil {
 			continue
 		}
@@ -201,20 +231,22 @@ func (db *Database) BreakHours(date string) (time.Duration, error) {
 	return db.hours("SELECT start, stop FROM 'activities' WHERE DATE = ? AND type = 'break'", date)
 }
 
-func (db *Database) Activities(date string) ([]Activity, error) {
+func (db *Database) Activities(date string) ([]data.Activity, error) {
 
-	rows, err := Db.db.Query(
+	rows, err := db.db.Query(
 		"SELECT type, start, stop FROM 'activities' WHERE date = ? ORDER BY id",
 		date,
 	)
-	ErrorCheck(err)
+	if err != nil {
+		log.Panic(err.Error())
+	}
 	defer rows.Close()
 
-	activities := make([]Activity, 0)
+	activities := make([]data.Activity, 0)
 
 	for rows.Next() {
 
-		activity := &Activity{}
+		activity := &data.Activity{}
 
 		rows.Scan(&activity.Type, &activity.Start, &activity.Stop)
 		activity.Date = date

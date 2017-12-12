@@ -1,0 +1,11 @@
+package utils
+
+const (
+	DEFAULT_TIME_FORMAT = "15:04:05"
+	DEFAULT_DATE_FORMAT = "02/01/2006"
+
+	WORKING_HOURS_LENGTH = 8
+
+	ACTIVITY_TYPE_SESSION = "session"
+	ACTIVITY_TYPE_BREAK   = "break"
+)
