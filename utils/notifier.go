@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -23,6 +24,7 @@ func init() {
 
 type Notifier interface {
 	Notify(...string) error
+	Error(...interface{}) error
 }
 
 type GnomeNotification struct {
@@ -40,16 +42,17 @@ func NewGnomeNotification(image string, title string) Notifier {
 		image = DefaultImagePath
 	}
 
-	return GnomeNotification{Title: title, Image: image}
+	return &GnomeNotification{Title: title, Image: image}
 }
 
 func (n GnomeNotification) Notify(info ...string) error {
 
-	return n.notify(strings.Join(info, "\n"))
+	command := exec.Command("notify-send", "-i", n.Image, n.Title, strings.Join(info, "\r"))
+	return command.Run()
 }
 
-func (n GnomeNotification) notify(info string) error {
+func (n GnomeNotification) Error(info ...interface{}) error {
 
-	command := exec.Command("notify-send", "-i", n.Image, n.Title, info)
+	command := exec.Command("notify-send", "-u", "critical", fmt.Sprint(info))
 	return command.Run()
 }

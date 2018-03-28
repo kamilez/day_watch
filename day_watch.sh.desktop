@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Exec=/home/kamil/go_workspace/bin/x-runner.sh
+Hidden=false
+X-GNOME-Autostart-enabled=true
+Name=x-runner
+Comment=

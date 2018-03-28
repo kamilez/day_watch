@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"reflect"
-	"time"
 
 	"github.com/kamilez/day_watch/data"
 	"github.com/kamilez/day_watch/utils"
@@ -25,151 +23,20 @@ func NewDatabase(path string) *Database {
 		log.Panic(err.Error())
 	}
 
-	return &Database{db, path}
+	database := &Database{db, path}
+	database.createActivityTable()
+
+	return database
 }
 
-func (db *Database) TableCreate(name string, obj interface{}) error {
+func (db *Database) createActivityTable() {
 
-	var query bytes.Buffer
-
-	query.WriteString("CREATE TABLE IF NOT EXISTS '" + name + "' (id INTEGER PRIMARY KEY AUTOINCREMENT")
-
-	typeOf := reflect.TypeOf(obj)
-	for i := 0; i < typeOf.NumField(); i++ {
-		query.WriteString(", " + typeOf.Field(i).Name + " " + typeOf.Field(i).Tag.Get("sql"))
-	}
-	query.WriteString(")")
-
-	stmt, err := db.db.Prepare(query.String())
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	_, err = stmt.Exec()
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	return err
-}
-
-func (db *Database) RowAppend(name string, obj interface{}) error {
-
-	var query bytes.Buffer
-
-	query.WriteString("INSERT INTO '" + name + "' (")
-
-	typeOf := reflect.TypeOf(obj)
-	for i := 0; i < typeOf.NumField(); i++ {
-
-		query.WriteString(typeOf.Field(i).Name)
-		if i != typeOf.NumField()-1 {
-			query.WriteString(", ")
-		}
-	}
-	query.WriteString(") VALUES (")
-
-	for i := 0; i < typeOf.NumField(); i++ {
-		str := fmt.Sprintf("%v", reflect.ValueOf(obj).Field(i).Interface())
-
-		switch reflect.ValueOf(obj).Field(i).Interface().(type) {
-		case string:
-			query.WriteString(`"` + str + `"`)
-		default:
-			query.WriteString(str)
-		}
-
-		if i != typeOf.NumField()-1 {
-			query.WriteString(", ")
-		}
-	}
-	query.WriteString(")")
-
-	stmt, err := db.db.Prepare(query.String())
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	_, err = stmt.Exec()
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	return err
-}
-
-func (db *Database) FirstActivity(date string, activityType string) (data.Activity, error) {
-
-	rows, err := db.db.Query(`
-		SELECT start, stop, type
-		FROM 'activities'
-		WHERE date = ? AND type = ?
-		ORDER BY ID LIMIT 1`,
-		date, activityType,
-	)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-	defer rows.Close()
-
-	activity := data.Activity{}
-	for rows.Next() {
-		err = rows.Scan(&activity.Start, &activity.Stop, &activity.Type)
-		if err != nil {
-			log.Panic(err.Error())
-		}
-	}
-
-	return activity, nil
-}
-
-func (db *Database) LastActivity(date string, activityType string) (data.Activity, error) {
-
-	rows, err := db.db.Query(
-		`SELECT Start, Stop
-		FROM 'activities' WHERE id = (SELECT MAX(ID)
-		FROM 'activities' WHERE type = ? AND date = ?)`,
-		activityType, date,
-	)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-	defer rows.Close()
-
-	activity := data.Activity{Date: date, Type: activityType}
-	for rows.Next() {
-		err = rows.Scan(&activity.Start, &activity.Stop)
-		if err != nil {
-			log.Panic(err.Error())
-		}
-
-	}
-
-	return activity, err
-}
-
-func (db *Database) UpdateActivityStartTime(activity data.Activity) error {
-
-	query := fmt.Sprintf(
-		`UPDATE 'activities'
-		SET start = '%s'
-		WHERE id = (SELECT MAX(ID)
-		FROM 'activities' WHERE type = '%s' AND date = '%s')`,
-		activity.Start, activity.Type, activity.Date,
-	)
-
-	return db.updateActivity(query, activity)
-}
-
-func (db *Database) UpdateActivityStopTime(activity data.Activity) error {
-
-	query := fmt.Sprintf("UPDATE 'activities' SET stop = '%s' WHERE start = '%s' AND date = '%s'",
-		activity.Stop, activity.Start, activity.Date)
-
-	return db.updateActivity(query, activity)
-}
-
-func (db *Database) updateActivity(query string, activity data.Activity) error {
+	query := `CREATE TABLE IF NOT EXISTS 'activities'
+		(id INTEGER PRIMARY KEY AUTOINCREMENT,
+		start TEXT,
+		stop TEXT,
+		type TEXT NOT NULL,
+		weekday TEXT)`
 
 	stmt, err := db.db.Prepare(query)
 	if err != nil {
@@ -180,63 +47,71 @@ func (db *Database) updateActivity(query string, activity data.Activity) error {
 	if err != nil {
 		log.Panic(err.Error())
 	}
-
-	return nil
 }
 
-func (db *Database) hours(query string, date string) (time.Duration, error) {
+func (db *Database) AppendActivityRow(activity *data.Activity) error {
 
-	rows, err := db.db.Query(query, date)
+	var query bytes.Buffer
+
+	query.WriteString("INSERT INTO 'activities' (start, stop, type, weekday) VALUES (")
+	query.WriteString("'" + utils.FormattedDatetime(activity.Start) + "', ")
+	query.WriteString("'" + utils.FormattedDatetime(activity.Stop) + "', ")
+	query.WriteString("'" + string(activity.Type) + "',")
+	query.WriteString("'" + activity.Weekday() + "')")
+
+	log.Println("Append row: ", query.String())
+	stmt, err := db.db.Prepare(query.String())
 	if err != nil {
 		log.Panic(err.Error())
 	}
-	defer rows.Close()
 
-	var duration time.Duration
-	var start, stop string
-	var startTime, stopTime time.Time
-
-	for rows.Next() {
-		err = rows.Scan(&start, &stop)
-		if err != nil {
-			log.Panic(err.Error())
-		}
-
-		if start == "" || stop == "" {
-			continue
-		}
-
-		startTime, err = time.Parse(utils.DEFAULT_TIME_FORMAT, start)
-		if err != nil {
-			continue
-		}
-
-		stopTime, err = time.Parse(utils.DEFAULT_TIME_FORMAT, stop)
-		if err != nil {
-			continue
-		}
-
-		duration += stopTime.Sub(startTime)
+	_, err = stmt.Exec()
+	if err != nil {
+		log.Panic(err.Error())
 	}
 
-	return duration, nil
+	return err
 }
 
-func (db *Database) SessionHours(date string) (time.Duration, error) {
-	return db.hours("SELECT start, stop FROM 'activities' WHERE DATE = ? AND type = 'session'", date)
-}
+func (db *Database) UpdateActivityStartTime(activity data.Activity) {
 
-func (db *Database) BreakHours(date string) (time.Duration, error) {
-
-	return db.hours("SELECT start, stop FROM 'activities' WHERE DATE = ? AND type = 'break'", date)
-}
-
-func (db *Database) Activities(date string) ([]data.Activity, error) {
-
-	rows, err := db.db.Query(
-		"SELECT type, start, stop FROM 'activities' WHERE date = ? ORDER BY id",
-		date,
+	query := fmt.Sprintf(`UPDATE 'activities'
+		SET start = '%s'
+		WHERE id = (SELECT MAX(ID)
+		FROM 'activities' WHERE type = '%s')`,
+		utils.FormattedDatetime(activity.Start), activity.Type,
 	)
+
+	db.updateActivity(query, activity)
+}
+
+func (db *Database) UpdateActivityStopTime(activity data.Activity) {
+
+	query := fmt.Sprintf("UPDATE 'activities' SET stop = '%s' WHERE start = '%s'",
+		utils.FormattedDatetime(activity.Stop), utils.FormattedDatetime(activity.Start))
+
+	db.updateActivity(query, activity)
+}
+
+func (db *Database) updateActivity(query string, activity data.Activity) {
+
+	log.Println("Update activity: ", query)
+
+	stmt, err := db.db.Prepare(query)
+	if err != nil {
+		log.Panic(err.Error())
+	}
+
+	_, err = stmt.Exec()
+	if err != nil {
+		log.Panic(err.Error())
+	}
+}
+
+func (db *Database) activities(query string, args ...interface{}) []data.Activity {
+	log.Println(query, args)
+
+	rows, err := db.db.Query(query, args...)
 	if err != nil {
 		log.Panic(err.Error())
 	}
@@ -244,15 +119,73 @@ func (db *Database) Activities(date string) ([]data.Activity, error) {
 
 	activities := make([]data.Activity, 0)
 
+	var start, stop, aType string
 	for rows.Next() {
 
-		activity := &data.Activity{}
+		err = rows.Scan(&start, &stop, &aType)
+		if err != nil {
+			log.Panic(err.Error())
+		}
 
-		rows.Scan(&activity.Type, &activity.Start, &activity.Stop)
-		activity.Date = date
+		activity := &data.Activity{
+			Start: *utils.String2Time(start),
+			Stop:  *utils.String2Time(stop),
+			Type:  data.ActivityType(aType),
+		}
 
 		activities = append(activities, *activity)
 	}
 
-	return activities, nil
+	return activities
+}
+
+func (db *Database) Activities(since, typeOf string) []data.Activity {
+	if typeOf == "session" || typeOf == "break" {
+		return db.activities(`SELECT start, stop, type FROM 'activities'
+			WHERE type = ? and start >= date(?, 'start of day')
+			ORDER BY ID`,
+			typeOf, since)
+	}
+
+	return db.activities(`SELECT start, stop, type FROM 'activities'
+		WHERE start >= date(?, 'start of day')
+		ORDER BY ID`,
+		since)
+
+}
+
+func (db *Database) FirstActivity(since, typeOf string) *data.Activity {
+
+	var result data.Activity
+
+	activities := db.Activities(since, typeOf)
+
+	if len(activities) > 0 {
+		result = activities[0]
+		return &result
+	}
+
+	return nil
+}
+
+func (db *Database) LastActivity(typeOf string) *data.Activity {
+
+	var activities []data.Activity
+
+	if typeOf == "session" || typeOf == "break" {
+		activities = db.activities(`SELECT start, stop, type FROM 'activities'
+			WHERE id = (SELECT MAX(id) FROM 'activities'
+			WHERE type = ?)`,
+			typeOf)
+	} else {
+		activities = db.activities(`SELECT start, stop, type FROM 'activities'
+			WHERE id = (SELECT MAX(id) FROM 'activities')`)
+	}
+
+	if len(activities) != 0 {
+		activity := activities[0]
+		return &activity
+	}
+
+	return nil
 }

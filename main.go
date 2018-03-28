@@ -7,6 +7,7 @@ import (
 
 	"github.com/kamilez/day_watch/app"
 	db "github.com/kamilez/day_watch/database"
+	"github.com/kamilez/day_watch/models"
 	"github.com/kamilez/day_watch/utils"
 )
 
@@ -57,8 +58,8 @@ func main() {
 	}
 
 	notifier := utils.NewGnomeNotification("", "DayWatch")
-
-	app := app.NewApp(db, notifier)
+	activityManager := models.NewActivityManager(db)
+	app := app.NewApp(activityManager, notifier)
 
 	if *notification == true {
 		app.HandleNotification()

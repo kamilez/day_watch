@@ -3,74 +3,56 @@ package app
 import (
 	"fmt"
 	"log"
+	"math"
 	"time"
 
-	"github.com/kamilez/day_watch/data"
-	db "github.com/kamilez/day_watch/database"
+	"github.com/kamilez/day_watch/models"
 	. "github.com/kamilez/day_watch/utils"
 )
 
 type App struct {
-	db       *db.Database
+	am       *models.ActivityManager
 	notifier Notifier
 }
 
-func NewApp(db *db.Database, notifier Notifier) *App {
-	db.TableCreate("activities", data.Activity{})
+func NewApp(am *models.ActivityManager, notifier Notifier) *App {
+	return &App{am, notifier}
+}
 
-	return &App{db, notifier}
+func (a App) OnError() {
+	if err := recover(); err != nil {
+		a.notifier.Error(err)
+	}
 }
 
 func (a App) HandleNotification() {
 
-	now := time.Now()
-	nowDate := now.Format(DEFAULT_DATE_FORMAT)
+	defer a.OnError()
 
-	breaks, err := a.db.BreakHours(nowDate)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	firstActivity, err := a.db.FirstActivity(nowDate, ACTIVITY_TYPE_SESSION)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	firstActivityStartTime, err := time.Parse(DEFAULT_TIME_FORMAT, firstActivity.Start)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	leaveTime := firstActivityStartTime.Add(WORKING_HOURS_LENGTH*time.Hour + breaks)
-	total, err := a.db.SessionHours(nowDate)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	lastActivity, err := a.db.LastActivity(nowDate, ACTIVITY_TYPE_SESSION)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	lastActivityTime, err := time.Parse(DEFAULT_TIME_FORMAT, lastActivity.Start)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	total += time.Duration(now.Hour()-lastActivityTime.Hour())*time.Hour +
-		time.Duration(now.Minute()-lastActivityTime.Minute())*time.Minute
+	workTime := a.am.WorkTime()
+	overtime, saturdayOvertime, sundayOvertime := a.am.Overtime()
 
 	label := []string{
-		"Started:\t" + firstActivityStartTime.Format("15:04"),
-		"Leave:\t\t" + leaveTime.Format("15:04"),
-		"Work time:\t" + fmt.Sprintf("%02d:%02d",
-			int(total.Hours()), int(total.Minutes())%60),
+		"Started:\t\t" + FormattedTime(a.am.FirstSession().Start),
+		"Leave:\t\t" + FormattedTime(a.am.LeaveTime()),
+		"Work time:\t" + fmt.Sprintf("%02d:%02d", int(workTime.Hours()), int(workTime.Minutes())%60),
+	}
+	if overtime != time.Duration(0) {
+		label = append(label, "Overtime:\t"+fmt.Sprintf("%02d:%02d", int(overtime.Hours()), int(math.Abs(overtime.Minutes()))%60))
+	}
+
+	if saturdayOvertime != time.Duration(0) {
+		label = append(label, "Saturday:\t"+fmt.Sprintf("%02d:%02d", int(saturdayOvertime.Hours()), int(math.Abs(saturdayOvertime.Minutes()))%60))
+	}
+
+	if sundayOvertime != time.Duration(0) {
+		label = append(label, "Sunday:\t"+fmt.Sprintf("%02d:%02d", int(sundayOvertime.Hours()), int(math.Abs(sundayOvertime.Minutes()))%60))
 	}
 
 	a.notifier.Notify(label...)
 }
 
-func (a App) onTomatoTick(timeLeft time.Duration, type_ SessionType) {
+func (a App) onTomatoTick(timeLeft time.Duration, type_ models.SessionType) {
 
 	timeInMinutes := int(timeLeft.Minutes())
 	formattedString := fmt.Sprintf("Time left: %d minutes", timeInMinutes)
@@ -79,7 +61,7 @@ func (a App) onTomatoTick(timeLeft time.Duration, type_ SessionType) {
 
 		var typeName string
 
-		if type_ == WORK {
+		if type_ == models.WORK {
 			typeName = "Work session"
 		} else {
 			typeName = "Break session"
@@ -91,18 +73,20 @@ func (a App) onTomatoTick(timeLeft time.Duration, type_ SessionType) {
 
 func (a App) HandleTomato() {
 
-	var session *TomatoSession
+	defer a.OnError()
+
+	var session *models.TomatoSession
 	for {
-		if session == nil || session.Type == BREAK {
+		if session == nil || session.Type == models.BREAK {
 			if Dial("Start work session") != nil {
 				return
 			}
-			session = NewTomatoSession(WORK, a.onTomatoTick)
+			session = models.NewTomatoSession(models.WORK, a.onTomatoTick)
 		} else {
 			if Dial("Start break session") != nil {
 				return
 			}
-			session = NewTomatoSession(BREAK, a.onTomatoTick)
+			session = models.NewTomatoSession(models.BREAK, a.onTomatoTick)
 		}
 
 		<-session.Run()
@@ -111,98 +95,51 @@ func (a App) HandleTomato() {
 
 func (a App) HandleLogin() {
 
-	now := time.Now()
+	defer a.OnError()
 
-	nowDateString := now.Format(DEFAULT_DATE_FORMAT)
-	activity := data.Activity{
-		Start: now.Format(DEFAULT_TIME_FORMAT),
-		Stop:  "",
-		Date:  nowDateString,
-		Type:  ACTIVITY_TYPE_SESSION,
+	lastActivity := a.am.LastActivity()
+	if lastActivity != nil && lastActivity.IsBreak() == true {
+		a.am.FinishActivity(lastActivity)
 	}
 
-	lastBreak, err := a.db.LastActivity(nowDateString, ACTIVITY_TYPE_BREAK)
-	if err != nil {
-		log.Fatalln(err.Error())
-	}
-
-	if lastBreak.Stop == "" {
-		lastBreak.Stop = now.Format(DEFAULT_TIME_FORMAT)
-		a.db.UpdateActivityStopTime(lastBreak)
-	}
-
-	a.db.RowAppend("activities", activity)
-
+	a.am.StartSession()
 	a.HandleNotification()
 }
 
 func (a App) HandleLogout() {
 
-	now := time.Now()
-	nowDateString := now.Format(DEFAULT_DATE_FORMAT)
-	nowTimeString := now.Format(DEFAULT_TIME_FORMAT)
+	defer a.OnError()
 
-	lastActivity, err := a.db.LastActivity(nowDateString, ACTIVITY_TYPE_SESSION)
-	if err != nil {
-		log.Panic(err.Error())
+	lastActivity := a.am.LastActivity()
+	if lastActivity != nil && lastActivity.IsBreak() == true {
+		a.am.StartBreak()
 	}
 
-	if lastActivity.Stop == "" {
-		lastActivity.Stop = nowTimeString
-		a.db.UpdateActivityStopTime(lastActivity)
-	}
-
-	lastActivity, err = a.db.LastActivity(nowDateString, ACTIVITY_TYPE_BREAK)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
-	if lastActivity.Start == "" {
-		lastActivity.Start = nowTimeString
-		a.db.UpdateActivityStartTime(lastActivity)
-	}
+	lastSession := a.am.LastSession()
+	a.am.FinishActivity(lastSession)
 }
 
 func (a App) HandleBreak() {
 
-	now := time.Now()
+	defer a.OnError()
 
-	nowDateString := now.Format(DEFAULT_DATE_FORMAT)
-	activity := data.Activity{
-		Start: "",
-		Stop:  "",
-		Date:  nowDateString,
-		Type:  ACTIVITY_TYPE_BREAK,
-	}
-
-	activites, err := a.db.Activities(nowDateString)
-	if err != nil {
-		log.Fatalln(err.Error())
-	}
-
-	if activites[len(activites)-1].Type == ACTIVITY_TYPE_BREAK {
+	lastActivity := a.am.LastActivity()
+	if lastActivity != nil && lastActivity.IsBreak() == true {
+		log.Println("Break is already set")
 		return
 	}
 
-	a.db.RowAppend("activities", activity)
+	a.am.SetBreak()
 }
 
 func (a App) HandleStatus() {
 
+	defer a.OnError()
+
 	now := time.Now()
-	nowDateString := now.Format(DEFAULT_DATE_FORMAT)
-
-	activities, err := a.db.Activities(nowDateString)
-	if err != nil {
-		log.Panic(err.Error())
-	}
-
+	activities := a.am.Activities(now)
 	if len(activities) == 0 {
-		activities, err =
-			a.db.Activities(now.AddDate(0, 0, -1).Format(DEFAULT_DATE_FORMAT))
-		if err != nil {
-			log.Panic(err.Error())
-		}
+		activities = a.am.Activities(now.AddDate(0, 0, -1))
 	}
 
 	if len(activities) == 0 {
@@ -213,7 +150,7 @@ func (a App) HandleStatus() {
 	fmt.Println("ID\tTYPE\t\tSTART\t\tSTOP\t\tDATE")
 	for k, v := range activities {
 		fmt.Printf("%d\t%s\t\t%s\t%s\t%s\n",
-			k, v.Type, v.Start, v.Stop, v.Date)
+			k, v.Type, v.StartString(), v.StopString(), v.DateString())
 	}
 
 }
