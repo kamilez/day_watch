@@ -59,7 +59,6 @@ func (db *Database) AppendActivityRow(activity *data.Activity) error {
 	query.WriteString("'" + string(activity.Type) + "',")
 	query.WriteString("'" + activity.Weekday() + "')")
 
-	log.Println("Append row: ", query.String())
 	stmt, err := db.db.Prepare(query.String())
 	if err != nil {
 		log.Panic(err.Error())
@@ -95,8 +94,6 @@ func (db *Database) UpdateActivityStopTime(activity data.Activity) {
 
 func (db *Database) updateActivity(query string, activity data.Activity) {
 
-	log.Println("Update activity: ", query)
-
 	stmt, err := db.db.Prepare(query)
 	if err != nil {
 		log.Panic(err.Error())
@@ -109,7 +106,6 @@ func (db *Database) updateActivity(query string, activity data.Activity) {
 }
 
 func (db *Database) activities(query string, args ...interface{}) []data.Activity {
-	log.Println(query, args)
 
 	rows, err := db.db.Query(query, args...)
 	if err != nil {

@@ -60,7 +60,6 @@ func (m ActivityManager) SetBreak() {
 		Type: data.ACTIVITY_TYPE_BREAK,
 	}
 
-	log.Println("Set break")
 	m.addActivity(activity)
 }
 
@@ -130,8 +129,6 @@ func (m ActivityManager) BreakTime() time.Duration {
 		duration += b.Stop.Sub(b.Start)
 	}
 
-	log.Println("Break time: ", duration)
-
 	return duration
 }
 
@@ -195,24 +192,15 @@ func breakTime(activities []data.Activity) time.Duration {
 
 func DailyOvertime(activities []data.Activity, date time.Time) time.Duration {
 
-	for _, v := range activities {
-		log.Println(v)
-	}
-	log.Println("Get overtime from: ", date.String())
-
 	firstSessionIdx := firstActivityOfTheDayIdx(activities, data.ACTIVITY_TYPE_SESSION, date)
 	if firstSessionIdx < 0 {
-		log.Println("First activity not found")
 		return time.Duration(0)
 	}
 
 	lastSessionIdx := firstSessionIdx + lastActivityOfTheDayIdx(activities[firstSessionIdx:], data.ACTIVITY_TYPE_SESSION, date)
 	if lastSessionIdx < 0 || firstSessionIdx > lastSessionIdx {
-		log.Println("Last activity not found")
 		return time.Duration(0)
 	}
-
-	log.Println("first: ", firstSessionIdx, " last: ", lastSessionIdx)
 
 	lastSession := activities[lastSessionIdx]
 	if lastSession.Stop.IsZero() {
