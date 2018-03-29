@@ -14,12 +14,10 @@ const (
 )
 
 type ActivityProvider interface {
-	Activities(since, typeOf string) []data.Activity
+	Activities(since, till, typeOf string) []data.Activity
 	AppendActivityRow(activity *data.Activity) error
 	UpdateActivityStartTime(activity data.Activity)
 	UpdateActivityStopTime(activity data.Activity)
-	FirstActivity(since, typeOf string) *data.Activity
-	LastActivity(typeOf string) *data.Activity
 }
 
 type ActivityManager struct {
@@ -46,13 +44,20 @@ func (m ActivityManager) StartSession() {
 }
 
 func (m ActivityManager) StartBreak() {
-	lastBreak := m.LastBreak()
-	if lastBreak == nil {
-		log.Panic("Can't start the break. Set break is missing.")
-	}
-	lastBreak.Start = time.Now()
 
-	m.db.UpdateActivityStartTime(*lastBreak)
+	breaks := m.dayActivities(time.Now(), data.ACTIVITY_TYPE_BREAK)
+	length := len(breaks)
+	if length == 0 {
+		log.Panic("No breaks set today")
+	}
+
+	lastBreak := breaks[length-1]
+	if lastBreak.Start.IsZero() == true && lastBreak.Stop.IsZero() == true {
+		lastBreak.Start = time.Now()
+		m.db.UpdateActivityStartTime(lastBreak)
+	} else {
+		log.Panic("Last break is already started or finished. Set new break to start.")
+	}
 }
 
 func (m ActivityManager) SetBreak() {
@@ -72,68 +77,78 @@ func (m ActivityManager) FinishActivity(activity *data.Activity) {
 	m.db.UpdateActivityStopTime(*activity)
 }
 
-func (m ActivityManager) FirstActivity(typeOf data.ActivityType) *data.Activity {
-	now := FormattedDatetime(time.Now())
-	return m.db.FirstActivity(now, string(typeOf))
+func startOfDay(t time.Time) time.Time {
+	return t.Truncate(24 * time.Hour)
 }
 
-func (m ActivityManager) lastActivity(typeOf data.ActivityType) *data.Activity {
-	return m.db.LastActivity(string(typeOf))
+func endOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, time.Local)
 }
 
-func (m ActivityManager) LastActivity() *data.Activity {
-	return m.lastActivity(data.ACTIVITY_TYPE_ANY)
+func (m ActivityManager) dayActivities(date time.Time, aType data.ActivityType) []data.Activity {
+
+	activities := m.db.Activities(
+		FormattedDatetime(startOfDay(date)),
+		FormattedDatetime(endOfDay(date)),
+		string(aType))
+
+	if len(activities) == 0 {
+		log.Println("No activities since ", startOfDay(date), " and till ", endOfDay(date))
+		return []data.Activity{}
+	}
+
+	return activities
 }
 
-func (m ActivityManager) FirstSession() *data.Activity {
-	return m.FirstActivity(data.ACTIVITY_TYPE_SESSION)
+func (m ActivityManager) FirstActivity(aType data.ActivityType) *data.Activity {
+
+	activities := m.dayActivities(time.Now(), aType)
+	if len(activities) == 0 {
+		return nil
+	}
+
+	return &activities[0]
 }
 
-func (m ActivityManager) LastSession() *data.Activity {
-	return m.lastActivity(data.ACTIVITY_TYPE_SESSION)
-}
+func (m ActivityManager) LastActivity(aType data.ActivityType) *data.Activity {
+	activities := m.dayActivities(time.Now(), aType)
 
-func (m ActivityManager) FirstBreak() *data.Activity {
-	return m.FirstActivity(data.ACTIVITY_TYPE_BREAK)
-}
+	length := len(activities)
+	if length == 0 {
+		return nil
+	}
 
-func (m ActivityManager) LastBreak() *data.Activity {
-	return m.lastActivity(data.ACTIVITY_TYPE_BREAK)
+	return &activities[length-1]
 }
 
 func (m ActivityManager) LeaveTime() time.Time {
-	firstActivity := m.FirstSession()
-	return firstActivity.Start.Add(WORKING_HOURS_LENGTH*time.Hour + m.BreakTime())
+	firstSession := m.FirstActivity(data.ACTIVITY_TYPE_SESSION)
+	if firstSession == nil {
+		log.Panic("Can't find first session of the day")
+	}
+
+	return firstSession.Start.Add(WORKING_HOURS_LENGTH*time.Hour + m.BreakTime())
 }
 
 func (m ActivityManager) WorkTime() time.Duration {
-	firstSessionStart := m.FirstSession().Start
-	now := time.Now()
+	firstSession := m.FirstActivity(data.ACTIVITY_TYPE_SESSION)
+	workTime := time.Now().Sub(firstSession.Start)
 
-	//TODO
-	total := time.Duration(now.Hour())*time.Hour +
-		time.Duration(now.Minute())*time.Minute +
-		time.Duration(now.Second())*time.Second -
-		(time.Duration(firstSessionStart.Hour())*time.Hour +
-			time.Duration(firstSessionStart.Minute())*time.Minute +
-			time.Duration(firstSessionStart.Second())*time.Second)
-
-	return total - m.BreakTime()
+	return workTime - m.BreakTime()
 }
 
-func (m ActivityManager) BreakTime() time.Duration {
-	var duration time.Duration
+func (m ActivityManager) BreakTime() (duration time.Duration) {
 
-	breaks := m.db.Activities(FormattedDatetime(time.Now()), data.ACTIVITY_TYPE_BREAK)
+	breaks := m.dayActivities(time.Now(), data.ACTIVITY_TYPE_BREAK)
 	for _, b := range breaks {
 		duration += b.Stop.Sub(b.Start)
 	}
 
-	return duration
+	return
 }
 
 func (m ActivityManager) Activities(date time.Time) []data.Activity {
-	return m.db.Activities(FormattedDatetime(date), data.ACTIVITY_TYPE_ANY)
+	return m.dayActivities(date, data.ACTIVITY_TYPE_ANY)
 }
 
 func firstActivityOfTheDayIdx(activities []data.Activity, aType data.ActivityType, date time.Time) int {
@@ -172,7 +187,7 @@ func lastActivityOfTheDayIdx(activities []data.Activity, aType data.ActivityType
 		lastIdx = k
 	}
 
-	return firstIdx
+	return lastIdx
 }
 
 func breakTime(activities []data.Activity) time.Duration {
@@ -190,7 +205,7 @@ func breakTime(activities []data.Activity) time.Duration {
 	return duration
 }
 
-func DailyOvertime(activities []data.Activity, date time.Time) time.Duration {
+func dayOvertime(activities []data.Activity, date time.Time) time.Duration {
 
 	firstSessionIdx := firstActivityOfTheDayIdx(activities, data.ACTIVITY_TYPE_SESSION, date)
 	if firstSessionIdx < 0 {
@@ -229,14 +244,14 @@ func DailyOvertime(activities []data.Activity, date time.Time) time.Duration {
 func (m ActivityManager) Overtime() (overtime, saturdayOvertime, sundayOvertime time.Duration) {
 	now := time.Now()
 
-	firstDayOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	activities := m.db.Activities(FormattedDatetime(firstDayOfMonth), string(data.ACTIVITY_TYPE_ANY))
+	firstDayOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	activities := m.db.Activities(FormattedDatetime(firstDayOfMonth), FormattedDatetime(endOfDay(now.AddDate(0, 0, -1))), string(data.ACTIVITY_TYPE_ANY))
 
 	day := firstDayOfMonth
 
 	for day.Before(now) {
 
-		ot := DailyOvertime(activities, day)
+		ot := dayOvertime(activities, day)
 		if ot != time.Duration(0) {
 			weekday := day.Weekday()
 			if weekday >= time.Monday && weekday <= time.Friday {

@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"runtime/debug"
 	"time"
 
+	"github.com/kamilez/day_watch/data"
 	"github.com/kamilez/day_watch/models"
 	. "github.com/kamilez/day_watch/utils"
 )
@@ -22,6 +24,7 @@ func NewApp(am *models.ActivityManager, notifier Notifier) *App {
 func (a App) OnError() {
 	if err := recover(); err != nil {
 		a.notifier.Error(err)
+		debug.PrintStack()
 	}
 }
 
@@ -33,7 +36,7 @@ func (a App) HandleNotification() {
 	overtime, saturdayOvertime, sundayOvertime := a.am.Overtime()
 
 	label := []string{
-		"Started:\t\t" + FormattedTime(a.am.FirstSession().Start),
+		"Started:\t\t" + FormattedTime(a.am.FirstActivity(data.ACTIVITY_TYPE_SESSION).Start),
 		"Leave:\t\t" + FormattedTime(a.am.LeaveTime()),
 		"Work time:\t" + fmt.Sprintf("%02d:%02d", int(workTime.Hours()), int(workTime.Minutes())%60),
 	}
@@ -97,7 +100,7 @@ func (a App) HandleLogin() {
 
 	defer a.OnError()
 
-	lastActivity := a.am.LastActivity()
+	lastActivity := a.am.LastActivity(data.ACTIVITY_TYPE_ANY)
 	if lastActivity != nil && lastActivity.IsBreak() == true {
 		a.am.FinishActivity(lastActivity)
 	}
@@ -110,20 +113,22 @@ func (a App) HandleLogout() {
 
 	defer a.OnError()
 
-	lastActivity := a.am.LastActivity()
+	lastActivity := a.am.LastActivity(data.ACTIVITY_TYPE_ANY)
 	if lastActivity != nil && lastActivity.IsBreak() == true {
 		a.am.StartBreak()
 	}
 
-	lastSession := a.am.LastSession()
-	a.am.FinishActivity(lastSession)
+	lastSession := a.am.LastActivity(data.ACTIVITY_TYPE_SESSION)
+	if lastSession != nil {
+		a.am.FinishActivity(lastSession)
+	}
 }
 
 func (a App) HandleBreak() {
 
 	defer a.OnError()
 
-	lastActivity := a.am.LastActivity()
+	lastActivity := a.am.LastActivity(data.ACTIVITY_TYPE_ANY)
 	if lastActivity != nil && lastActivity.IsBreak() == true {
 		log.Println("Break is already set")
 		return
@@ -152,5 +157,4 @@ func (a App) HandleStatus() {
 		fmt.Printf("%d\t%s\t\t%s\t%s\t%s\n",
 			k, v.Type, v.StartString(), v.StopString(), v.DateString())
 	}
-
 }

@@ -37,7 +37,7 @@ func string2DateTime(str, format string) *time.Time {
 		return &time.Time{}
 	}
 
-	t, err := time.Parse(format, str)
+	t, err := time.ParseInLocation(format, str, time.Local)
 	if err != nil {
 		log.Panic(err.Error())
 	}

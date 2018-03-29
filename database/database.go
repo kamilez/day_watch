@@ -135,53 +135,17 @@ func (db *Database) activities(query string, args ...interface{}) []data.Activit
 	return activities
 }
 
-func (db *Database) Activities(since, typeOf string) []data.Activity {
+func (db *Database) Activities(since, till, typeOf string) []data.Activity {
 	if typeOf == "session" || typeOf == "break" {
 		return db.activities(`SELECT start, stop, type FROM 'activities'
-			WHERE type = ? and start >= date(?, 'start of day')
+			WHERE type = ? and start >= datetime(?) and start <= datetime(?)
 			ORDER BY ID`,
-			typeOf, since)
+			typeOf, since, till)
 	}
 
 	return db.activities(`SELECT start, stop, type FROM 'activities'
-		WHERE start >= date(?, 'start of day')
+		WHERE start >= datetime(?) and start <= datetime(?)
 		ORDER BY ID`,
-		since)
+		since, till)
 
-}
-
-func (db *Database) FirstActivity(since, typeOf string) *data.Activity {
-
-	var result data.Activity
-
-	activities := db.Activities(since, typeOf)
-
-	if len(activities) > 0 {
-		result = activities[0]
-		return &result
-	}
-
-	return nil
-}
-
-func (db *Database) LastActivity(typeOf string) *data.Activity {
-
-	var activities []data.Activity
-
-	if typeOf == "session" || typeOf == "break" {
-		activities = db.activities(`SELECT start, stop, type FROM 'activities'
-			WHERE id = (SELECT MAX(id) FROM 'activities'
-			WHERE type = ?)`,
-			typeOf)
-	} else {
-		activities = db.activities(`SELECT start, stop, type FROM 'activities'
-			WHERE id = (SELECT MAX(id) FROM 'activities')`)
-	}
-
-	if len(activities) != 0 {
-		activity := activities[0]
-		return &activity
-	}
-
-	return nil
 }
